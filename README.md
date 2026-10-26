@@ -5,7 +5,7 @@ Shared helpers, base template and styles for Blue Core Airflow 3 plugins.
 ## Install
 
 ```sh
-uv add "bluecore-airflow-common @ git+https://github.com/blue-core-lod/bluecore-airflow-common"
+uv add bluecore-airflow-common
 ```
 
 ## Usage
