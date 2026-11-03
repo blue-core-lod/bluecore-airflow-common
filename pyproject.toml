@@ -10,7 +10,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
-     "apache-airflow>=3.2,<4"
+     "apache-airflow>=3.2,<4",
+     "httpx>=0.28,<1",
+     "pydantic>=2.7,<3",
 ]
 
 [build-system]
@@ -19,7 +21,15 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.16.1",
     "pytest>=8.3.4",
+    "pytest-asyncio>=1.4.1.post1",
+    "respx>=0.23.1",
     "ruff>=0.9.7",
+    "ty>=0.0.96",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ty.src]
+include = ["src", "tests"]

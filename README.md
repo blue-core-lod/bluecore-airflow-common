@@ -44,6 +44,6 @@ own files at `{url_prefix}/static/`. In tests, switch off authentication with
 
 ```sh
 uv run ruff format && uv run ruff check
-uv run mypy src tests
+uv run ty check
 uv run pytest
 ```

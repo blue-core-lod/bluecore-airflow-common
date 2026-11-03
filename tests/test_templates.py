@@ -12,6 +12,7 @@ def airflow_at_root(monkeypatch):
 def test_common_base_is_found_without_a_plugin_directory():
     template = common.templates().get_template("bluecore/base.html")
 
+    assert template.filename is not None
     assert template.filename.endswith("templates/bluecore/base.html")
 
 
