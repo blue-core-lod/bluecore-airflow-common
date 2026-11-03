@@ -16,9 +16,10 @@ PACKAGE_DATA = [
 
 INTEGRATION_MODULES = [
     "bluecore_airflow_common/integration/__init__.py",
-    "bluecore_airflow_common/integration/settings.py",
     "bluecore_airflow_common/integration/errors.py",
+    "bluecore_airflow_common/integration/http_factory.py",
     "bluecore_airflow_common/integration/retry.py",
+    "bluecore_airflow_common/integration/settings.py",
 ]
 
 
