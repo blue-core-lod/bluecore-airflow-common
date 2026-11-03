@@ -14,6 +14,11 @@ PACKAGE_DATA = [
     "bluecore_airflow_common/templates/bluecore/base.html",
 ]
 
+INTEGRATION_MODULES = [
+    "bluecore_airflow_common/integration/__init__.py",
+    "bluecore_airflow_common/integration/settings.py",
+]
+
 
 @pytest.fixture(scope="module")
 def wheel_contents(tmp_path_factory):
@@ -38,3 +43,18 @@ def test_wheel_includes_package_data(wheel_contents, path):
 
 def test_wheel_includes_the_license(wheel_contents):
     assert any(name.endswith(".dist-info/licenses/LICENSE") for name in wheel_contents)
+
+
+@pytest.mark.parametrize("path", INTEGRATION_MODULES)
+def test_wheel_includes_integration_modules(wheel_contents, path):
+    assert path in wheel_contents
+
+
+def test_wheel_leaves_out_tool_caches(wheel_contents):
+    caches = [
+        name
+        for name in wheel_contents
+        if "/.ruff_cache/" in name or "/__pycache__/" in name
+    ]
+
+    assert caches == []
