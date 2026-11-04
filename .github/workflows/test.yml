@@ -19,7 +19,7 @@ jobs:
         run: uv run ruff check
 
       - name: Type Checking
-        run: uv run mypy src tests
+        run: uv run ty check
 
   test:
     runs-on: ubuntu-latest
