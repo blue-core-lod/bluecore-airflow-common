@@ -13,13 +13,12 @@ Only failures before the response headers arrive are retried here. A
 timeout while the client reads the body is not.
 """
 
-import asyncio
 import email.utils
 import logging
 import math
 import random
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import httpx
@@ -51,18 +50,18 @@ def retry_after(response: httpx.Response) -> float | None:
     return max(0.0, seconds)
 
 
-class RetryTransport(httpx.AsyncBaseTransport):
+class RetryTransport(httpx.BaseTransport):
     """An httpx transport that retries idempotent requests a bounded number of times"""
 
     def __init__(
         self,
-        transport: httpx.AsyncBaseTransport,
+        transport: httpx.BaseTransport,
         *,
         max_retries: int,
         backoff: float = 0.5,
         max_backoff: float = 8.0,
         deadline: float = 30.0,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._transport = transport
@@ -73,15 +72,15 @@ class RetryTransport(httpx.AsyncBaseTransport):
         self._sleep = sleep
         self._clock = clock
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
         if request.method not in RETRY_METHODS:
-            return await self._transport.handle_async_request(request)
+            return self._transport.handle_request(request)
 
         give_up_at = self._clock() + self._deadline
         attempt = 0
         while True:
             try:
-                response = await self._transport.handle_async_request(request)
+                response = self._transport.handle_request(request)
             except RETRY_EXCEPTIONS as exc:
                 delay = self._delay(attempt, None, give_up_at)
                 if delay is None:
@@ -93,7 +92,7 @@ class RetryTransport(httpx.AsyncBaseTransport):
                 delay = self._delay(attempt, retry_after(response), give_up_at)
                 if delay is None:
                     return response
-                await response.aclose()
+                response.close()
                 reason = str(response.status_code)
 
             attempt += 1
@@ -106,7 +105,7 @@ class RetryTransport(httpx.AsyncBaseTransport):
                 attempt,
                 self._max_retries,
             )
-            await self._sleep(delay)
+            self._sleep(delay)
 
     def _delay(
         self, attempt: int, server_delay: float | None, give_up_at: float
@@ -123,5 +122,5 @@ class RetryTransport(httpx.AsyncBaseTransport):
             return None
         return delay
 
-    async def aclose(self) -> None:
-        await self._transport.aclose()
+    def close(self) -> None:
+        self._transport.close()
