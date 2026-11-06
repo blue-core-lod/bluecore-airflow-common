@@ -17,7 +17,7 @@ class FakeTime:
     def clock(self) -> float:
         return self.now
 
-    async def sleep(self, seconds: float) -> None:
+    def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
         self.now += seconds
 
@@ -44,9 +44,7 @@ def fake_time() -> FakeTime:
     return FakeTime()
 
 
-def make_client(
-    upstream: Upstream, fake_time: FakeTime, **options
-) -> httpx.AsyncClient:
+def make_client(upstream: Upstream, fake_time: FakeTime, **options) -> httpx.Client:
     options.setdefault("max_retries", 2)
     transport = retry.RetryTransport(
         httpx.MockTransport(upstream),
@@ -54,7 +52,7 @@ def make_client(
         clock=fake_time.clock,
         **options,
     )
-    return httpx.AsyncClient(transport=transport, base_url="http://bc_api:8100")
+    return httpx.Client(transport=transport, base_url="http://bc_api:8100")
 
 
 def with_retry_after(value: str) -> httpx.Response:
@@ -92,14 +90,14 @@ def test_retry_after_missing_header():
 
 
 @pytest.mark.parametrize("failure", [502, 503, 504])
-async def test_get_retries_retryable_status(fake_time, failure):
+def test_get_retries_retryable_status(fake_time, failure):
     """
     Every status (502, 503, 504) gets exactly one retry, then succeeds.
     """
     upstream = Upstream(failure, 200)
 
-    async with make_client(upstream, fake_time) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 200
     assert upstream.calls == ["GET", "GET"]
@@ -108,62 +106,64 @@ async def test_get_retries_retryable_status(fake_time, failure):
 @pytest.mark.parametrize(
     "failure", [httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout]
 )
-async def test_get_retries_retryable_exception(fake_time, failure):
+def test_get_retries_retryable_exception(fake_time, failure):
     """
     Every exception in RETRY_EXCEPTIONS gets exactly one retry, then succeeds
     """
     upstream = Upstream(failure, 200)
 
-    async with make_client(upstream, fake_time) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 200
     assert upstream.calls == ["GET", "GET"]
 
 
-async def test_head_is_retried(fake_time):
+def test_head_is_retried(fake_time):
     upstream = Upstream(503, 200)
 
-    async with make_client(upstream, fake_time) as client:
-        response = await client.head("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        response = client.head("/resources/1")
 
     assert response.status_code == 200
     assert upstream.calls == ["HEAD", "HEAD"]
 
 
-async def test_gives_up_with_last_response(fake_time):
+def test_gives_up_with_last_response(fake_time):
     """
     With max_retries=2 there are 3 calls in total: one attempt plus two retries.
     Then the last response is returned.
     """
     upstream = Upstream(503)
 
-    async with make_client(upstream, fake_time, max_retries=2) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time, max_retries=2) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 503
     assert len(upstream.calls) == 3
 
 
-async def test_gives_up_by_raising_last_exception(fake_time):
+def test_gives_up_by_raising_last_exception(fake_time):
     """
     With max_retries=2 there are 3 calls in total: one attempt plus two retries.
     Then the last exception is re-raised unchanged
     """
     upstream = Upstream(httpx.ReadTimeout)
 
-    async with make_client(upstream, fake_time, max_retries=2) as client:
-        with pytest.raises(httpx.ReadTimeout):
-            await client.get("/resources/1")
+    with (
+        make_client(upstream, fake_time, max_retries=2) as client,
+        pytest.raises(httpx.ReadTimeout),
+    ):
+        client.get("/resources/1")
 
     assert len(upstream.calls) == 3
 
 
-async def test_zero_retries_sends_once(fake_time):
+def test_zero_retries_sends_once(fake_time):
     upstream = Upstream(503)
 
-    async with make_client(upstream, fake_time, max_retries=0) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time, max_retries=0) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 503
     assert upstream.calls == ["GET"]
@@ -171,11 +171,11 @@ async def test_zero_retries_sends_once(fake_time):
 
 
 @pytest.mark.parametrize("status", [200, 404, 429, 500, 501])
-async def test_other_statuses_are_not_retried(fake_time, status):
+def test_other_statuses_are_not_retried(fake_time, status):
     upstream = Upstream(status)
 
-    async with make_client(upstream, fake_time) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == status
     assert upstream.calls == ["GET"]
@@ -184,19 +184,18 @@ async def test_other_statuses_are_not_retried(fake_time, status):
 @pytest.mark.parametrize(
     "failure", [httpx.WriteTimeout, httpx.PoolTimeout, httpx.RemoteProtocolError]
 )
-async def test_other_exceptions_are_not_retried(fake_time, failure):
+def test_other_exceptions_are_not_retried(fake_time, failure):
     upstream = Upstream(failure)
 
-    async with make_client(upstream, fake_time) as client:
-        with pytest.raises(failure):
-            await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client, pytest.raises(failure):
+        client.get("/resources/1")
 
     assert upstream.calls == ["GET"]
 
 
 @pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
 @pytest.mark.parametrize("failure", [503, httpx.ConnectError, httpx.ReadTimeout])
-async def test_unsafe_methods_are_never_retried(fake_time, method, failure):
+def test_unsafe_methods_are_never_retried(fake_time, method, failure):
     """
     A 4 x 3 grid of 12 cases: each unsafe method, against each kind of retryable failure, with max_retries=5
     so that only the method check can stop a retry. The script is Upstream(failure, 200), so a wrongly
@@ -204,9 +203,9 @@ async def test_unsafe_methods_are_never_retried(fake_time, method, failure):
     """
     upstream = Upstream(failure, 200)
 
-    async with make_client(upstream, fake_time, max_retries=5) as client:
+    with make_client(upstream, fake_time, max_retries=5) as client:
         try:
-            await client.request(method, "/resources/1")
+            client.request(method, "/resources/1")
         except httpx.TransportError:
             pass
 
@@ -214,7 +213,7 @@ async def test_unsafe_methods_are_never_retried(fake_time, method, failure):
     assert fake_time.sleeps == []
 
 
-async def test_backoff_doubles_up_to_the_cap(fake_time, monkeypatch):
+def test_backoff_doubles_up_to_the_cap(fake_time, monkeypatch):
     """
     Replaces random.uniform with a version that always returns the upper limit. That
     turns the jittered wait into its ceiling, so the exact schedule 0.5, 1, 2, 4, 8 can be asserted.
@@ -224,40 +223,40 @@ async def test_backoff_doubles_up_to_the_cap(fake_time, monkeypatch):
     monkeypatch.setattr(retry.random, "uniform", lambda low, high: high)
     upstream = Upstream(503)
 
-    async with make_client(upstream, fake_time, max_retries=5, deadline=60) as client:
-        await client.get("/resources/1")
+    with make_client(upstream, fake_time, max_retries=5, deadline=60) as client:
+        client.get("/resources/1")
 
     assert fake_time.sleeps == [0.5, 1.0, 2.0, 4.0, 8.0]
 
 
-async def test_backoff_is_jittered(fake_time):
+def test_backoff_is_jittered(fake_time):
     """
     Uses the real random and checks only that each wait falls between 0 and its ceiling.
     zip(..., strict=True) also fails if the number of waits is wrong.
     """
     upstream = Upstream(503)
 
-    async with make_client(upstream, fake_time, max_retries=5, deadline=60) as client:
-        await client.get("/resources/1")
+    with make_client(upstream, fake_time, max_retries=5, deadline=60) as client:
+        client.get("/resources/1")
 
     ceilings = [0.5, 1.0, 2.0, 4.0, 8.0]
     assert all(0 <= s <= c for s, c in zip(fake_time.sleeps, ceilings, strict=True))
 
 
-async def test_retry_after_replaces_backoff(fake_time):
+def test_retry_after_replaces_backoff(fake_time):
     """
     The wait is exactly the server's Retry-After of 3 seconds, not a jittered value.
     """
     upstream = Upstream(with_retry_after("3"), 200)
 
-    async with make_client(upstream, fake_time) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 200
     assert fake_time.sleeps == [3.0]
 
 
-async def test_retry_after_past_deadline_stops(fake_time):
+def test_retry_after_past_deadline_stops(fake_time):
     """
     A 120-second Retry-After with a 30-second deadline means no wait and no second call.
     The 503 comes back right away, which errors.py turns into 502. The script ends in a
@@ -265,57 +264,57 @@ async def test_retry_after_past_deadline_stops(fake_time):
     """
     upstream = Upstream(with_retry_after("120"), 200)
 
-    async with make_client(upstream, fake_time, deadline=30) as client:
-        response = await client.get("/resources/1")
+    with make_client(upstream, fake_time, deadline=30) as client:
+        response = client.get("/resources/1")
 
     assert response.status_code == 503
     assert upstream.calls == ["GET"]
     assert fake_time.sleeps == []
 
 
-async def test_deadline_bounds_total_wait(fake_time):
+def test_deadline_bounds_total_wait(fake_time):
     """
     Shows the deadline, not the retry count of 4, is what stopped it.
     """
     upstream = Upstream(with_retry_after("4"))
 
-    async with make_client(upstream, fake_time, max_retries=5, deadline=10) as client:
-        await client.get("/resources/1")
+    with make_client(upstream, fake_time, max_retries=5, deadline=10) as client:
+        client.get("/resources/1")
 
     assert fake_time.sleeps == [4.0, 4.0]
     assert len(upstream.calls) == 3
 
 
-async def test_discarded_responses_are_closed(fake_time):
+def test_discarded_responses_are_closed(fake_time):
     first = httpx.Response(503)
     upstream = Upstream(first, 200)
 
-    async with make_client(upstream, fake_time) as client:
-        await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        client.get("/resources/1")
 
     assert first.is_closed
 
 
-async def test_retries_are_logged(fake_time, caplog):
+def test_retries_are_logged(fake_time, caplog):
     upstream = Upstream(503, 200)
 
-    async with make_client(upstream, fake_time) as client:
-        await client.get("/resources/1")
+    with make_client(upstream, fake_time) as client:
+        client.get("/resources/1")
 
     (record,) = caplog.records
     assert "GET http://bc_api:8100/resources/1 after 503" in record.getMessage()
     assert "retry 1 of 2" in record.getMessage()
 
 
-async def test_aclose_closes_wrapped_transport():
-    class Wrapped(httpx.AsyncBaseTransport):
+def test_close_closes_wrapped_transport():
+    class Wrapped(httpx.BaseTransport):
         closed = False
 
-        async def aclose(self) -> None:
+        def close(self) -> None:
             self.closed = True
 
     wrapped = Wrapped()
 
-    await retry.RetryTransport(wrapped, max_retries=2).aclose()
+    retry.RetryTransport(wrapped, max_retries=2).close()
 
     assert wrapped.closed

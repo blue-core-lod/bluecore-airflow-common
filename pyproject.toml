@@ -12,6 +12,7 @@ requires-python = ">=3.12"
 dependencies = [
      "apache-airflow>=3.2,<4",
      "apache-airflow-client>=3.2,<3.4",
+     "bluecore-client>=0.3",
      "httpx>=0.28,<1",
      "marc-bibframe>=0.3,<0.4",
      "pydantic>=2.7,<3",
@@ -24,14 +25,10 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=8.3.4",
-    "pytest-asyncio>=1.4.1.post1",
     "respx>=0.23.1",
     "ruff>=0.9.7",
     "ty>=0.0.96",
 ]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
 
 [tool.ty.src]
 include = ["src", "tests"]
