@@ -15,6 +15,7 @@ import re
 import uuid
 from typing import Any, ClassVar
 
+import bluecore_client
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -141,9 +142,15 @@ def from_response(response: httpx.Response) -> IntegrationError:
 
 
 def from_exception(exc: Exception) -> IntegrationError:
-    """The error for an exception raised by httpx"""
+    """The error for an exception raised by httpx or bluecore client"""
     if isinstance(exc, IntegrationError):
         return exc
+    if isinstance(exc, bluecore_client.APIError) and exc.response is not None:
+        return from_response(exc.response)
+    if isinstance(exc, bluecore_client.AuthError):
+        return ReauthRequired(str(exc))
+    if isinstance(exc.__cause__, httpx.HTTPError):
+        return from_exception(exc.__cause__)
     if isinstance(exc, httpx.HTTPStatusError):
         return from_response(exc.response)
     if isinstance(exc, httpx.TimeoutException):
@@ -190,3 +197,4 @@ def install_error_handler(app: FastAPI) -> None:
     """Return IntegrationError and httpx errors as the shared error body"""
     app.add_exception_handler(IntegrationError, _handle)
     app.add_exception_handler(httpx.HTTPError, _handle)
+    app.add_exception_handler(bluecore_client.BluecoreError, _handle)

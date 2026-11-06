@@ -1,5 +1,6 @@
 import logging
 
+import bluecore_client
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -185,3 +186,107 @@ def test_handler_replaces_unsafe_request_ids(client, supplied):
     assert request_id != supplied
     assert len(request_id) == 32
     assert response.headers["X-Request-ID"] == request_id
+
+
+def bluecore_get(upstream) -> httpx.Response:
+    """GET a work through bluecore-client in a route with the error handler
+
+    ``upstream`` answers bluecore-client's request, as an httpx.MockTransport
+    handler.
+    """
+    app = FastAPI()
+    errors.install_error_handler(app)
+
+    @app.get("/work")
+    def work():
+        client = bluecore_client.BluecoreClient(
+            api_url="http://bc_api:8100",
+            anonymous=True,
+            load_dotenv=False,
+            transport=httpx.MockTransport(upstream),
+        )
+        return client.works.get("w1")
+
+    return TestClient(app).get("/work")
+
+
+def answer(outcome: httpx.Response | Exception):
+    """An upstream handler that returns or raises ``outcome``"""
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return upstream
+
+
+@pytest.mark.parametrize(
+    "outcome,http_status,code",
+    [
+        (httpx.Response(401), 401, "reauth_required"),
+        (httpx.Response(403), 403, "forbidden"),
+        (httpx.Response(404), 404, "not_found"),
+        (httpx.Response(413), 422, "invalid_request"),
+        (httpx.Response(422, json={"detail": []}), 422, "invalid_request"),
+        (httpx.Response(503), 502, "upstream_unavailable"),
+        (httpx.ReadTimeout("slow"), 504, "upstream_timeout"),
+        (httpx.ConnectError("refused"), 502, "upstream_unavailable"),
+        (
+            httpx.Response(301, headers={"Location": "https://elsewhere/"}),
+            502,
+            "bad_upstream_response",
+        ),
+    ],
+)
+def test_handler_maps_bluecore_client_errors(outcome, http_status, code):
+    """
+    Each upstream status or failure, raised by bluecore-client as its own
+    exception, comes back as the shared error body with the mapped status.
+    """
+    response = bluecore_get(answer(outcome))
+
+    assert response.status_code == http_status
+    assert response.json()["error"]["code"] == code
+
+
+def test_bluecore_redirect_is_not_followed():
+    """
+    A redirect from Blue Core becomes a 502 with upstream_status 301, and its
+    Location is never requested.
+    """
+    hosts = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        return httpx.Response(301, headers={"Location": "https://elsewhere/"})
+
+    response = bluecore_get(upstream)
+
+    assert response.status_code == 502
+    assert response.json()["error"]["upstream_status"] == 301
+    assert hosts == ["bc_api"]
+
+
+def test_from_exception_maps_auth_error_without_response():
+    """
+    An AuthError with no response, raised when a token has expired and there
+    are no credentials to renew it, means the user has to sign in again.
+    """
+    exc = bluecore_client.AuthError("Access token is expired")
+
+    assert type(errors.from_exception(exc)) is errors.ReauthRequired
+
+
+def test_from_exception_maps_connection_failed_by_cause():
+    """
+    ConnectionFailed is mapped by the httpx error it wraps, so a timeout is a
+    504 and a refused connection is a 502.
+    """
+    timeout = bluecore_client.ConnectionFailed("could not reach")
+    timeout.__cause__ = httpx.ReadTimeout("slow")
+    refused = bluecore_client.ConnectionFailed("could not reach")
+    refused.__cause__ = httpx.ConnectError("refused")
+
+    assert type(errors.from_exception(timeout)) is errors.UpstreamTimeout
+    assert type(errors.from_exception(refused)) is errors.UpstreamUnavailable
