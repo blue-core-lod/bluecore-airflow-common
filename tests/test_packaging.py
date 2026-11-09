@@ -19,9 +19,12 @@ INTEGRATION_MODULES = [
     "bluecore_airflow_common/integration/airflow.py",
     "bluecore_airflow_common/integration/auth.py",
     "bluecore_airflow_common/integration/blue_core.py",
+    "bluecore_airflow_common/integration/convert.py",
     "bluecore_airflow_common/integration/errors.py",
+    "bluecore_airflow_common/integration/reports.py",
     "bluecore_airflow_common/integration/retry.py",
     "bluecore_airflow_common/integration/settings.py",
+    "bluecore_airflow_common/integration/uploads.py",
 ]
 
 
