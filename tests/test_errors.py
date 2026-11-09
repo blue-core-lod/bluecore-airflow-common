@@ -3,6 +3,16 @@ import logging
 import bluecore_client
 import httpx
 import pytest
+import urllib3
+import urllib3.connection
+from airflow_client.client.exceptions import (
+    ApiException,
+    ForbiddenException,
+    NotFoundException,
+    ServiceException,
+    UnauthorizedException,
+    UnprocessableEntityException,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -290,3 +300,123 @@ def test_from_exception_maps_connection_failed_by_cause():
 
     assert type(errors.from_exception(timeout)) is errors.UpstreamTimeout
     assert type(errors.from_exception(refused)) is errors.UpstreamUnavailable
+
+
+@pytest.mark.parametrize(
+    "exc,error_class,http_status",
+    [
+        (UnauthorizedException(status=401), errors.ReauthRequired, 401),
+        (ForbiddenException(status=403), errors.Forbidden, 403),
+        (NotFoundException(status=404), errors.NotFound, 404),
+        (UnprocessableEntityException(status=422), errors.InvalidRequest, 422),
+        (ServiceException(status=503), errors.UpstreamUnavailable, 502),
+        (ApiException(status=301), errors.BadUpstreamResponse, 502),
+    ],
+)
+def test_from_exception_maps_airflow_status(exc, error_class, http_status):
+    """
+    An Airflow client ApiException maps by its status with the same rules as
+    a Blue Core response, and keeps that status as upstream_status.
+    """
+    error = errors.from_exception(exc)
+
+    assert type(error) is error_class
+    assert error.status_code == http_status
+    assert error.upstream_status == exc.status
+
+
+def test_from_exception_keeps_airflow_body_for_logging():
+    """
+    The Airflow body is kept for the log, cut to 2,000 characters, and left
+    out of the error's message.
+    """
+    error = errors.from_exception(ServiceException(status=500, body="x" * 5000))
+
+    assert error.upstream_body == "x" * 2000
+    assert str(error) == "Airflow returned 500"
+
+
+def test_from_exception_maps_airflow_ssl_failure():
+    """
+    The Airflow client reports an SSL failure as ApiException with status 0,
+    which is an unavailable upstream, not an upstream status.
+    """
+    error = errors.from_exception(ApiException(status=0, reason="SSL failed"))
+
+    assert type(error) is errors.UpstreamUnavailable
+    assert error.upstream_status is None
+
+
+AIRFLOW_POOL = urllib3.HTTPConnectionPool("airflow-apiserver", 8080)
+
+
+def refused() -> urllib3.exceptions.NewConnectionError:
+    connection = urllib3.connection.HTTPConnection("airflow-apiserver", 8080)
+    return urllib3.exceptions.NewConnectionError(connection, "connection refused")
+
+
+def read_timeout() -> urllib3.exceptions.ReadTimeoutError:
+    return urllib3.exceptions.ReadTimeoutError(AIRFLOW_POOL, "/api/v2", "timed out")
+
+
+def out_of_retries(reason: Exception) -> urllib3.exceptions.MaxRetryError:
+    return urllib3.exceptions.MaxRetryError(AIRFLOW_POOL, "/api/v2", reason)
+
+
+@pytest.mark.parametrize(
+    "exc,error_class",
+    [
+        (read_timeout(), errors.UpstreamTimeout),
+        (urllib3.exceptions.ConnectTimeoutError("slow"), errors.UpstreamTimeout),
+        (refused(), errors.UpstreamUnavailable),
+        (urllib3.exceptions.ProtocolError("reset"), errors.UpstreamUnavailable),
+        (
+            out_of_retries(read_timeout()),
+            errors.UpstreamTimeout,
+        ),
+        (
+            out_of_retries(refused()),
+            errors.UpstreamUnavailable,
+        ),
+    ],
+)
+def test_from_exception_maps_urllib3_errors(exc, error_class):
+    """
+    urllib3 errors from the Airflow client map like httpx ones: a timeout is
+    504 and anything else 502. MaxRetryError maps by the error it wraps, and a
+    refused connection is 502 even though urllib3 makes NewConnectionError a
+    ConnectTimeoutError.
+    """
+    assert type(errors.from_exception(exc)) is error_class
+
+
+@pytest.mark.parametrize(
+    "exc,http_status,code",
+    [
+        (NotFoundException(status=404), 404, "not_found"),
+        (ServiceException(status=503), 502, "upstream_unavailable"),
+        (
+            out_of_retries(read_timeout()),
+            504,
+            "upstream_timeout",
+        ),
+    ],
+)
+def test_handler_maps_airflow_client_errors(exc, http_status, code):
+    """
+    An Airflow client or urllib3 error that a route lets propagate comes back
+    as the shared error body, without the Airflow body.
+    """
+    app = FastAPI()
+    errors.install_error_handler(app)
+
+    @app.get("/run")
+    def run():
+        exc.body = SECRET_BODY
+        raise exc
+
+    response = TestClient(app).get("/run")
+
+    assert response.status_code == http_status
+    assert response.json()["error"]["code"] == code
+    assert "abc123" not in response.text

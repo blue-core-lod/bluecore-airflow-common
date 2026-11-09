@@ -41,7 +41,10 @@ def hostile_environment(monkeypatch):
 @pytest.fixture
 def settings() -> BlueCoreSettings:
     return BlueCoreSettings(
-        internal_url=API, public_url="https://bcld.info", max_retries=1
+        internal_url=API,
+        public_url="https://bcld.info",
+        max_retries=1,
+        airflow_internal_url="http://airflow-apiserver:8080/workflows",
     )
 
 

@@ -14,6 +14,9 @@ container from ``.env``:
     Seconds allowed for each upstream request. Default 10.
 ``BLUECORE_MAX_RETRIES``
     Retries for idempotent (GET and HEAD) requests. Default 2, at most 5.
+``AIRFLOW_API_INTERNAL_URL``
+    Airflow root as the plugins reach it, e.g.
+    ``http://airflow-apiserver:8080/workflows``.
 
 Importing this module never raises and never touches the network: missing or
 invalid configuration is logged, and only raises ``SettingsError`` when the
@@ -67,6 +70,7 @@ class BlueCoreSettings(BaseModel):
     max_retries: int = Field(
         default=2, ge=0, le=5, validation_alias="BLUECORE_MAX_RETRIES"
     )
+    airflow_internal_url: BaseUrl = Field(validation_alias="AIRFLOW_API_INTERNAL_URL")
 
 
 # Only these variables are passed to validation, so an error message can never
