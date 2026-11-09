@@ -19,7 +19,7 @@ service account. Both dependencies read that user from Airflow's
 
 import logging
 import re
-from typing import Annotated
+from typing import Annotated, Any
 
 from airflow.api_fastapi.app import get_auth_manager
 from airflow.api_fastapi.core_api.security import GetUserDep
@@ -52,7 +52,18 @@ def keycloak_token(user: GetUserDep) -> str:
 
 
 def airflow_token(user: GetUserDep) -> str:
-    """A short-lived Airflow JWT for the signed-in user, for ``/api/v2``"""
+    """A short-lived Airflow JWT for the signed-in user, for ``/api/v2``
+
+    Raises:
+        ReauthRequired: if there is no user, or a Keycloak user has lost their
+            access token. On Airflow 3.3 the Keycloak provider's
+            ``get_user_from_token`` returns ``None`` when the browser JWT
+            arrives without the Keycloak cookies, and ``get_user`` passes that
+            on. Users from auth managers without ``access_token`` (the simple
+            auth manager) are let through.
+    """
+    if user is None or (hasattr(user, "access_token") and not user.access_token):
+        raise ReauthRequired("the signed-in user's Keycloak session has ended")
     manager = get_auth_manager()
     # The Keycloak provider's generate_api_jwt puts the Keycloak tokens in the
     # claims. Auth managers without it (and Airflow 3.2, where generate_jwt
@@ -65,10 +76,26 @@ KeycloakToken = Annotated[str, Depends(keycloak_token)]
 AirflowToken = Annotated[str, Depends(airflow_token)]
 
 
+def _redact(value: Any) -> Any:
+    """``value`` with secrets replaced in every string inside it"""
+    if isinstance(value, str):
+        return _SECRETS.sub(REDACTED, value)
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_redact(item) for item in value)
+    return value
+
+
 class RedactTokens(logging.Filter):
     """Replace bearer tokens and JWTs in a log message with ``[REDACTED]``"""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, dict):
+            # A structlog event dict: ProcessorFormatter needs a dict here, so
+            # redact its values in place of turning it into a string.
+            record.msg = _redact(record.msg)
+            return True
         message = record.getMessage()
         redacted = _SECRETS.sub(REDACTED, message)
         if redacted != message:

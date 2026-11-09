@@ -37,18 +37,55 @@ def test_keycloak_token_is_the_users_access_token():
 
 @pytest.mark.parametrize(
     "user",
-    [FakeUser(), FakeUser(access_token=""), FakeUser(access_token=None)],
-    ids=["missing", "empty", "none"],
+    [None, FakeUser(), FakeUser(access_token=""), FakeUser(access_token=None)],
+    ids=["no-user", "missing", "empty", "none"],
 )
 def test_keycloak_token_without_a_token_requires_reauth(user):
     """A user with no usable token raises ReauthRequired
 
-    "missing" is a user from another auth manager, which has no access_token
-    at all. "empty" is what the Keycloak provider gives on Airflow 3.3 when
-    the token cookie is gone. "none" guards against a later provider change.
+    "no-user" is what get_user passes on Airflow 3.3 when the browser JWT
+    arrives without the Keycloak cookies: the provider's get_user_from_token
+    returns None. "missing" is a user from another auth manager, which has no
+    access_token at all. "empty" and "none" guard against a provider that
+    returns the user with its token cleared.
     """
     with pytest.raises(ReauthRequired):
         auth.keycloak_token(user)
+
+
+@pytest.mark.parametrize(
+    "user",
+    [None, FakeUser(access_token=""), FakeUser(access_token=None)],
+    ids=["no-user", "empty", "none"],
+)
+def test_airflow_token_without_a_session_requires_reauth(monkeypatch, user):
+    """No user, or a Keycloak user with no token, raises before minting a JWT"""
+
+    def generate(user, *, expiration_time_in_seconds):
+        pytest.fail("a JWT was minted for a user without a session")
+
+    manager = SimpleNamespace(generate_api_jwt=generate, generate_jwt=generate)
+    monkeypatch.setattr(auth, "get_auth_manager", lambda: manager)
+
+    with pytest.raises(ReauthRequired):
+        auth.airflow_token(user)
+
+
+def test_a_missing_user_gets_401_from_airflow_token():
+    """Through a plugin route, a None user is a 401, not a 500"""
+    app = FastAPI()
+    install_error_handler(app)
+
+    @app.get("/")
+    def index(token: auth.AirflowToken):
+        return {"token": token}
+
+    app.dependency_overrides[get_user] = lambda: None
+
+    response = TestClient(app).get("/")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "reauth_required"
 
 
 def test_a_user_without_a_token_gets_401_reauth_required():
@@ -151,6 +188,46 @@ def test_redact_tokens(msg, args, expected):
 
     assert auth.RedactTokens().filter(record) is True
     assert record.getMessage() == expected
+
+
+def test_redact_tokens_in_a_structlog_event(monkeypatch):
+    """A structlog record is redacted and still formatted
+
+    Airflow 3.3's root handler uses structlog's ProcessorFormatter, which
+    needs record.msg to stay the event dict. Turning it into a string drops
+    the line with a logging error.
+    """
+    import io
+
+    import structlog
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processor=structlog.processors.JSONRenderer()
+        )
+    )
+    handler.addFilter(auth.RedactTokens())
+    logger = logging.getLogger("test_structlog_redaction")
+    monkeypatch.setattr(logger, "handlers", [handler])
+    monkeypatch.setattr(logger, "propagate", False)
+    logger.setLevel(logging.INFO)
+    log = structlog.wrap_logger(
+        logger,
+        processors=[structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        wrapper_class=structlog.stdlib.BoundLogger,
+    )
+    errors = []
+    monkeypatch.setattr(handler, "handleError", errors.append)
+
+    log.info("calling", headers={"Authorization": f"Bearer {FAKE_JWT}"}, n=[FAKE_JWT])
+
+    assert errors == []
+    output = stream.getvalue()
+    assert FAKE_JWT not in output
+    assert '"Authorization": "[REDACTED]"' in output
+    assert '"event": "calling"' in output
 
 
 def test_install_token_redaction_adds_one_filter_per_handler(monkeypatch):
