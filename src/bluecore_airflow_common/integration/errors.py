@@ -17,6 +17,8 @@ from typing import Any, ClassVar
 
 import bluecore_client
 import httpx
+import urllib3
+from airflow_client.client.exceptions import ApiException
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -129,11 +131,15 @@ def _body_excerpt(response: httpx.Response) -> str:
         return ""
 
 
+def _error_class(status: int) -> type[IntegrationError]:
+    default = UpstreamUnavailable if status >= 500 else BadUpstreamResponse
+    return _BY_STATUS.get(status, default)
+
+
 def from_response(response: httpx.Response) -> IntegrationError:
     """The error for an unsuccessful upstream response"""
     status = response.status_code
-    default = UpstreamUnavailable if status >= 500 else BadUpstreamResponse
-    error_class = _BY_STATUS.get(status, default)
+    error_class = _error_class(status)
     return error_class(
         f"{response.request.method} {response.request.url} returned {status}",
         upstream_status=status,
@@ -142,13 +148,26 @@ def from_response(response: httpx.Response) -> IntegrationError:
 
 
 def from_exception(exc: Exception) -> IntegrationError:
-    """The error for an exception raised by httpx or bluecore client"""
+    """The error for an exception raised by httpx or bluecore client or the
+    Airflow"""
     if isinstance(exc, IntegrationError):
         return exc
     if isinstance(exc, bluecore_client.APIError) and exc.response is not None:
         return from_response(exc.response)
     if isinstance(exc, bluecore_client.AuthError):
         return ReauthRequired(str(exc))
+    if isinstance(exc, ApiException) and exc.status:
+        return _error_class(exc.status)(
+            f"Airflow returned {exc.status}",
+            upstream_status=exc.status,
+            upstream_body=(exc.body or "")[:_BODY_LOG_LIMIT],
+        )
+    if isinstance(exc, urllib3.exceptions.MaxRetryError) and exc.reason:
+        return from_exception(exc.reason)
+    if isinstance(exc, urllib3.exceptions.NewConnectionError):
+        return UpstreamUnavailable(repr(exc))
+    if isinstance(exc, urllib3.exceptions.TimeoutError):
+        return UpstreamTimeout(repr(exc))
     if isinstance(exc.__cause__, httpx.HTTPError):
         return from_exception(exc.__cause__)
     if isinstance(exc, httpx.HTTPStatusError):
@@ -194,7 +213,10 @@ async def _handle(request: Request, exc: Exception) -> JSONResponse:
 
 
 def install_error_handler(app: FastAPI) -> None:
-    """Return IntegrationError and httpx errors as the shared error body"""
+    """Return IntegrationError and httpx bluecore-client and Airflow client errors
+    as the shared error body"""
     app.add_exception_handler(IntegrationError, _handle)
     app.add_exception_handler(httpx.HTTPError, _handle)
     app.add_exception_handler(bluecore_client.BluecoreError, _handle)
+    app.add_exception_handler(ApiException, _handle)
+    app.add_exception_handler(urllib3.exceptions.HTTPError, _handle)
