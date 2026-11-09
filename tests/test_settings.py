@@ -13,6 +13,7 @@ from bluecore_airflow_common.integration import settings
 REQUIRED = {
     "BLUECORE_API_INTERNAL_URL": "http://bc_api:8100/",
     "BLUECORE_URL": "http://localhost/",
+    "AIRFLOW_API_INTERNAL_URL": "http://airflow-apiserver:8080/workflows",
 }
 
 
@@ -73,6 +74,7 @@ def test_every_field_is_read_from_a_variable():
         "BLUECORE_URL",
         "BLUECORE_REQUEST_TIMEOUT",
         "BLUECORE_MAX_RETRIES",
+        "AIRFLOW_API_INTERNAL_URL",
     ]
 
 
@@ -92,6 +94,7 @@ def test_loads_valid_config(monkeypatch):
     assert loaded.public_url == "http://localhost"
     assert loaded.request_timeout == 2.5
     assert loaded.max_retries == 3
+    assert loaded.airflow_internal_url == "http://airflow-apiserver:8080/workflows"
 
 
 @pytest.mark.usefixtures("configured")
@@ -117,12 +120,30 @@ def test_unset_or_empty_tunables_use_defaults(monkeypatch, value):
         ("BLUECORE_REQUEST_TIMEOUT", "soon"),
         ("BLUECORE_MAX_RETRIES", "6"),
         ("BLUECORE_MAX_RETRIES", "-1"),
+        ("AIRFLOW_API_INTERNAL_URL", "airflow-apiserver:8080"),
     ],
 )
 def test_rejects_invalid_config(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
 
     with pytest.raises(settings.SettingsError, match=name):
+        settings.get_settings()
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_requires_airflow_url(monkeypatch, value):
+    """
+    AIRFLOW_API_INTERNAL_URL is required: unset or empty, loading settings
+    raises SettingsError naming it.
+    """
+    for name, required in REQUIRED.items():
+        monkeypatch.setenv(name, required)
+    if value is None:
+        monkeypatch.delenv("AIRFLOW_API_INTERNAL_URL")
+    else:
+        monkeypatch.setenv("AIRFLOW_API_INTERNAL_URL", value)
+
+    with pytest.raises(settings.SettingsError, match="AIRFLOW_API_INTERNAL_URL"):
         settings.get_settings()
 
 
@@ -170,7 +191,9 @@ def test_public_config_as_a_dependency():
         return public
 
     app.dependency_overrides[settings.get_settings] = lambda: settings.BlueCoreSettings(
-        internal_url="http://bc_api:8100", public_url="https://bcld.info"
+        internal_url="http://bc_api:8100",
+        public_url="https://bcld.info",
+        airflow_internal_url="http://airflow-apiserver:8080/workflows",
     )
 
     body = TestClient(app).get("/config").json()
