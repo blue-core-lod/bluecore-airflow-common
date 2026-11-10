@@ -1,0 +1,28 @@
+{#
+  PyScript for Blue Core plugin pages, pinned to one release with Subresource
+  Integrity. Include it in the head block of a page that runs PyScript:
+
+    {% block head %}{% include "bluecore/_pyscript.html" %}{% endblock %}
+
+  SRI covers only these two files. core.js goes on to import its own chunks
+  from the same release directory, and Pyodide from cdn.jsdelivr.net, so the
+  page's Content-Security-Policy has to limit where scripts come from (see
+  docs/integration-contracts.md).
+
+  Don't edit the pins by hand: run scripts/pyscript_sri.py <version>.
+#}
+{% set pyscript_version = "2026.7.3" %}
+{% set pyscript_core_css_sha384 = "sha384-o++qDUkHN/tDenoAyi/04ieijWtS4vDiM0SHtQ45zm4OGYazmb4c2SZJq1nb60Tb" %}
+{% set pyscript_core_js_sha384 = "sha384-cT5+REpVx+UDxyyaTXhPHjOCwt1hxRF5FOXKd0joB8PoErnVqapB25vAxnQKnSv5" %}
+<link
+  rel="stylesheet"
+  href="https://pyscript.net/releases/{{ pyscript_version }}/core.css"
+  integrity="{{ pyscript_core_css_sha384 }}"
+  crossorigin="anonymous"
+/>
+<script
+  type="module"
+  src="https://pyscript.net/releases/{{ pyscript_version }}/core.js"
+  integrity="{{ pyscript_core_js_sha384 }}"
+  crossorigin="anonymous"
+></script>
