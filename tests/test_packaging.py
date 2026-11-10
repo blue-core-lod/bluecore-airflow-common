@@ -11,6 +11,7 @@ PACKAGE_DATA = [
     "bluecore_airflow_common/py.typed",
     "bluecore_airflow_common/static/bluecore.css",
     "bluecore_airflow_common/static/bluecore.js",
+    "bluecore_airflow_common/templates/bluecore/_pyscript.html",
     "bluecore_airflow_common/templates/bluecore/base.html",
 ]
 
