@@ -50,7 +50,7 @@ def client() -> TestClient:
 
     @app.get("/input/invalid")
     def invalid():
-        raise errors.InvalidInput("could not read MARC: secret-detail")
+        raise errors.InvalidInput("could not read the input: secret-detail")
 
     return TestClient(app)
 
