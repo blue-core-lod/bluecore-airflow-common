@@ -1,8 +1,9 @@
 """Errors raised by the Blue Core integration, and the handler that returns them
 
-Every failure talking to an upstream service (the Blue Core API or Airflow) is
-raised as an ``IntegrationError`` subclass. ``install_error_handler(app)``
-turns each one into a response with this body::
+Every failure talking to an upstream service (the Blue Core API or Airflow),
+and any input the integration refuses is raised as an ``IntegrationError``
+subclass. ``install_error_handler(app)`` turns each one into a response with
+this body::
 
     {"error": {"code": ..., "message": ..., "upstream_status": ..., "request_id": ...}}
 
@@ -98,6 +99,18 @@ class UpstreamUnavailable(IntegrationError):
 class BadUpstreamResponse(IntegrationError):
     code = "bad_upstream_response"
     message = "The upstream service sent a response that could not be used"
+
+
+class InputTooLarge(IntegrationError):
+    status_code = 413
+    code = "input_too_large"
+    message = "The input is too large"
+
+
+class InvalidInput(IntegrationError):
+    status_code = 422
+    code = "invalid_input"
+    message = "The input could not be read"
 
 
 class NotImplementedUpstream(IntegrationError):

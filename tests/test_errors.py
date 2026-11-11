@@ -44,6 +44,14 @@ def client() -> TestClient:
     def bf2marc():
         raise errors.NotImplementedUpstream("BIBFRAME to MARC", BF2MARC_ISSUE)
 
+    @app.get("/input/too-large")
+    def too_large():
+        raise errors.InputTooLarge("input is 3000000000 bytes, secret-detail")
+
+    @app.get("/input/invalid")
+    def invalid():
+        raise errors.InvalidInput("could not read the input: secret-detail")
+
     return TestClient(app)
 
 
@@ -134,6 +142,8 @@ def test_every_error_is_an_integration_error():
         "UpstreamTimeout",
         "UpstreamUnavailable",
         "BadUpstreamResponse",
+        "InputTooLarge",
+        "InvalidInput",
         "NotImplementedUpstream",
     }
 
@@ -186,6 +196,26 @@ def test_handler_links_missing_capability(client):
     assert response.status_code == 501
     assert response.json()["error"]["code"] == "not_available"
     assert BF2MARC_ISSUE in response.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "path,http_status,code",
+    [
+        ("/input/too-large", 413, "input_too_large"),
+        ("/input/invalid", 422, "invalid_input"),
+    ],
+)
+def test_handler_returns_refused_input(client, path, http_status, code):
+    """
+    Input the integration refuses comes back in the shared error body with no
+    upstream status, and the detail (sizes, parser messages) stays in the logs.
+    """
+    response = client.get(path)
+
+    assert response.status_code == http_status
+    assert response.json()["error"]["code"] == code
+    assert response.json()["error"]["upstream_status"] is None
+    assert "secret-detail" not in response.text
 
 
 @pytest.mark.parametrize("supplied", ["", "abc\nevil", "x" * 65, "<script>"])
