@@ -26,7 +26,7 @@ from collections.abc import Iterable
 from typing import BinaryIO
 
 from bluecore_airflow_common.integration.errors import InputTooLarge, InvalidInput
-from bluecore_airflow_common.integration.reports import slug
+from bluecore_airflow_common.integration.reports import safe_parts
 
 DEFAULT_UPLOADS_DIR = "/opt/airflow/uploads"
 MAX_BYTES = 2 * 1024**3  # 2 GiB
@@ -58,10 +58,7 @@ def stage_upload(
     suffix = pathlib.PurePath(filename).suffix.lower()
     if suffix not in allowed:
         raise InvalidInput(f"{filename!r} does not end in one of {sorted(allowed)}")
-    parts = [slug(plugin), slug(user)]
-    if any(part in ("", ".", "..") for part in parts):
-        raise ValueError(f"cannot stage uploads for {plugin!r} {user!r}")
-    directory = (base_dir or uploads_dir()).joinpath(*parts)
+    directory = (base_dir or uploads_dir()).joinpath(*safe_parts(plugin, user))
     directory.mkdir(parents=True, exist_ok=True)
 
     name = uuid.uuid4().hex

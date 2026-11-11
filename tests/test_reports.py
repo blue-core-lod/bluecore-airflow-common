@@ -45,6 +45,18 @@ def test_reports_dir_defaults_to_airflow_volume(monkeypatch):
     assert reports.reports_dir() == pathlib.Path("/opt/airflow/reports")
 
 
+def test_safe_parts_slugs_each_value():
+    """Each value comes back slugged, in order, as one path component"""
+    assert reports.safe_parts("graph-toolbox", "a/../b") == ["graph-toolbox", "a_.._b"]
+
+
+@pytest.mark.parametrize("unsafe", ["..", ".", "", "///", "_"])
+def test_safe_parts_rejects_parts_that_leave_the_base(unsafe):
+    """A value that slugs to "..", "." or nothing raises ValueError"""
+    with pytest.raises(ValueError):
+        reports.safe_parts("ok", unsafe)
+
+
 @pytest.mark.parametrize("unsafe", ["..", ".", "", "///", "_"])
 @pytest.mark.parametrize("position", ["dag_id", "run_id"])
 def test_run_dir_rejects_ids_that_leave_their_directory(tmp_path, unsafe, position):

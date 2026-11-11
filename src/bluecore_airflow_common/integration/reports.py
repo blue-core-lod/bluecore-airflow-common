@@ -37,6 +37,21 @@ def slug(value: str) -> str:
     return UNSAFE.sub("_", value).strip("_")
 
 
+def safe_parts(*values: str) -> list[str]:
+    """Each value slugged, for joining under a base directory
+
+    ``slug()`` removes every separator, so the only way out of the base
+    directory is a part that slugs to ``..``, ``.`` or nothing.
+
+    Raises:
+        ValueError: if any value slugs to ``..``, ``.`` or nothing.
+    """
+    parts = [slug(value) for value in values]
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"cannot make path parts from {values!r}")
+    return parts
+
+
 def run_dir(
     dag_id: str, run_id: str, base_dir: pathlib.Path | None = None
 ) -> pathlib.Path:
@@ -45,9 +60,10 @@ def run_dir(
     Raises:
         NotFound: if either id can't name a directory inside the reports volume.
     """
-    parts = [slug(dag_id), slug(run_id)]
-    if any(part in ("", ".", "..") for part in parts):
-        raise NotFound(f"no report directory for {dag_id!r} {run_id!r}")
+    try:
+        parts = safe_parts(dag_id, run_id)
+    except ValueError:
+        raise NotFound(f"no report directory for {dag_id!r} {run_id!r}") from None
     return (base_dir or reports_dir()).joinpath(*parts)
 
 
