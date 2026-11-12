@@ -58,9 +58,7 @@ The Content-Security-Policy these pages need is in
 `bluecore_airflow_common.integration` builds clients for the Blue Core API
 ([`bluecore-client`](https://pypi.org/project/bluecore-client/)) and Airflow's
 `/api/v2` ([`apache-airflow-client`](https://pypi.org/project/apache-airflow-client/)),
-converts MARC and BIBFRAME with
-[`marc-bibframe`](https://pypi.org/project/marc-bibframe/), and reads reports
-and stages uploads on the shared volumes. `import bluecore_airflow_common`
+and reads reports and stages uploads on the shared volumes. `import bluecore_airflow_common`
 doesn't load it, so plugins that only use the templates don't need its
 configuration. What each upstream capability offers, and what's still missing,
 is in [docs/integration-contracts.md](docs/integration-contracts.md).
@@ -119,7 +117,7 @@ def job(run_id: str, settings: Settings, token: auth.AirflowToken) -> dict:
     return {"state": run.state}
 ```
 
-Use plain `def` routes: both clients and the converters are synchronous, so
+Use plain `def` routes: both clients are synchronous, so
 FastAPI runs them in its threadpool. Reads from Blue Core are anonymous; for a
 write, pass `token=` from `auth.KeycloakToken` to `blue_core.make_client`.
 Upstream failures come back as

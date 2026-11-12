@@ -19,7 +19,7 @@ from a request.
 
 | Concern | Owner | How plugins reach it |
 |---|---|---|
-| Conversion (MARC ⇄ BIBFRAME) | [`marc-bibframe`](https://pypi.org/project/marc-bibframe/), run in-process by plugins, the Blue Core API and the `marc_to_bibframe` DAG | `integration.convert` |
+| Conversion (MARC ⇄ BIBFRAME) | the Graph Toolbox plugin for single records; the bluecore-workflows `marc_to_bibframe` DAG for bulk | not in this package. Bulk runs are started with `integration.airflow.make_client()` |
 | Persistence | Blue Core API and its database; the `resource_loader`, `archived_file_loader` and `bulk_update` DAGs also write to it | `integration.blue_core.make_client()` |
 | LSP export (FOLIO, Alma) | bluecore-workflows `monitor_institutions_exports` DAG, started by the Blue Core API's `POST /export/` | the Blue Core API |
 | Job execution | Airflow, running bluecore-workflows DAGs | `integration.airflow.make_client()` |
@@ -43,20 +43,8 @@ its blocking issue.
 
 ## Conversion
 
-### Single record: **exists**
-
-| | |
-|---|---|
-| Owner | `marc-bibframe`, in the plugin's process |
-| Call | `convert.marc2xml(marc)`, `convert.marc2bibframe(marc, baseuri=…)`, `convert.bibframe2marc(rdf, …)` |
-| Auth | none: no upstream call. `bibframe2marc` looks up authorities on id.loc.gov unless given `authority_lookup=False` |
-| Schemas | in: binary MARC21 or MARCXML (a UTF-8 BOM is dropped), or BIBFRAME RDF. Out: MARCXML `<collection>` bytes, or an `rdflib.Graph` |
-| Limits | `max_bytes`, default 2 GiB, checked before parsing: 413 `input_too_large`. Unreadable input: 422 `invalid_input` |
-| Idempotency | pure function, safe to repeat |
-
-Call it from a plain `def` route so FastAPI runs it in its threadpool.
-Conversion is CPU-bound and would block the event loop in an `async def`
-route.
+Single-record conversion belongs to the Graph Toolbox plugin and isn't
+described here.
 
 ### Bulk: **partial**
 
@@ -205,8 +193,8 @@ base-uri 'none'
   these plugins, along with `BLUECORE_API_INTERNAL_URL` and `BLUECORE_URL`.
   Missing values are logged at import, and requests fail until they're set.
 - Raise nginx's `client_max_body_size` on the Airflow location to the plugins'
-  upload limit (2 GiB by default), and size container memory for conversions
-  near that limit: `marc-bibframe` and `marc_to_bibframe` hold the whole input
+  upload limit (2 GiB by default), and size the Airflow workers' memory for
+  bulk conversions near that limit: `marc_to_bibframe` holds the whole input
   and its graph in memory.
 - Mount the reports volume at `/opt/airflow/reports` (or set
   `BLUECORE_REPORTS_DIR`) in every Airflow container. `compose-base.yaml`
