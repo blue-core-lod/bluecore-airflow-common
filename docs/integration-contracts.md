@@ -174,17 +174,32 @@ and release this package.
 SRI only covers those two files. `core.js` then imports its own chunks from the
 same release directory, and PyScript loads Pyodide from `cdn.jsdelivr.net`
 and packages such as RDFLib from PyPI. None of those carry a hash, so the page's
-`Content-Security-Policy` has to limit where they can come from. A starting
-point for 2026.7.3:
+`Content-Security-Policy` has to limit where they can come from. For 2026.7.3:
 
 ```
-script-src 'self' https://pyscript.net/releases/2026.7.3/ https://cdn.jsdelivr.net/pyodide/ 'wasm-unsafe-eval';
+script-src 'self' https://pyscript.net/releases/2026.7.3/ https://cdn.jsdelivr.net/pyodide/ 'wasm-unsafe-eval' 'unsafe-eval';
 style-src 'self' https://pyscript.net/releases/2026.7.3/;
-connect-src 'self' https://cdn.jsdelivr.net/pyodide/ https://pypi.org https://files.pythonhosted.org;
+connect-src 'self' blob: https://cdn.jsdelivr.net/pyodide/ https://pypi.org https://files.pythonhosted.org;
 worker-src 'self' blob:;
 object-src 'none';
 base-uri 'none'
 ```
+
+This was checked in Chrome 157 with the shared `base.html` and
+`_pyscript.html`, loading RDFLib from PyPI and parsing a graph, in both
+`Content-Security-Policy-Report-Only` and enforcing mode, on the main thread
+and in a `worker`. It reported no violations. Two sources can't be dropped:
+
+- `'unsafe-eval'`: PyScript builds its plugin hooks with `new Function(…)`
+  before any Python runs. Without it an enforcing policy stops PyScript with an
+  `EvalError` and the page's Python never starts.
+- `blob:` in `connect-src`: a `<script type="py" worker>` fetches its worker
+  from a `blob:` URL. Without it the worker fails with `Failed to fetch`.
+
+`'unsafe-eval'` lets scripts that already run on the page evaluate strings; it
+doesn't allow scripts from any other origin. Run the policy as
+`Content-Security-Policy-Report-Only` on bluecore-stack before enforcing it,
+since the Airflow UI and other plugins share the origin.
 
 ## Deployment notes for bluecore-stack
 
