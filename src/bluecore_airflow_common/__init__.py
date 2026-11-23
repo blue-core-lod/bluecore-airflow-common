@@ -11,6 +11,9 @@ are searched first, then this package's. The common ones live under
 
     {% extends "bluecore/base.html" %}
     {% block content %}...{% endblock %}
+
+Every page gets the same Blue Core header and footer as Marva and DCTap Dancer.
+They come from bluecore-stack, so outside the stack they don't show.
 """
 
 from __future__ import annotations
@@ -28,8 +31,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 __all__ = [
+    "HEADER_FOOTER_SCRIPT",
     "airflow_root_path",
     "context",
+    "logout_url",
     "mount_static",
     "requires_login",
     "static_url",
@@ -42,6 +47,9 @@ TEMPLATES_DIR = PACKAGE_DIR / "templates"
 
 STATIC_ROUTE = "/static"
 COMMON_STATIC_ROUTE = f"{STATIC_ROUTE}/bluecore"
+
+# The header/footer script, served by bluecore-stack on the same site as Airflow.
+HEADER_FOOTER_SCRIPT = "/assets/bluecore/bluecore-header-footer.js"
 
 # Authentication is delegated to Airflow: the iframe request carries Airflow's
 # JWT cookie, which this resolves through the configured auth manager (Keycloak
@@ -58,6 +66,14 @@ def airflow_root_path() -> str:
     whatever ``[api] base_url`` says.
     """
     return urlsplit(conf.get("api", "base_url", fallback="") or "/").path.rstrip("/")
+
+
+def logout_url() -> str:
+    """Return Airflow's logout URL, used by the header's Logout button.
+
+    Logging out here works the same as logging out of Airflow itself.
+    """
+    return f"{airflow_root_path()}/api/v2/auth/logout"
 
 
 def templates(
@@ -106,5 +122,19 @@ def context(url_prefix: str, **extra: Any) -> dict[str, Any]:
     Templates get a ``static_url`` function rather than a fixed path, so they
     keep working for pages nested under a plugin's prefix, where a relative URL
     would resolve against the wrong directory.
+
+    The header reads these optional values from ``extra``:
+
+    - ``app_name``: the name after the Blue Core logo, e.g. ``"TOOLBOX"``
+    - ``app_logo``: URL of the plugin's own logo, e.g. ``static_url("toolbox.svg")``
+    - ``current_app``: this app's id, so it's left out of the app menu
+      (``"toolbox"`` for the Graph Toolbox)
+
+    The header doesn't show who is signed in, matching the design.
     """
-    return {"static_url": functools.partial(static_url, url_prefix), **extra}
+    return {
+        "static_url": functools.partial(static_url, url_prefix),
+        "header_footer_script": HEADER_FOOTER_SCRIPT,
+        "logout_url": logout_url(),
+        **extra,
+    }

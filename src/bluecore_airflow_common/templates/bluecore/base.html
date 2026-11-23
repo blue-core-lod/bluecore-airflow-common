@@ -5,7 +5,9 @@
     {% extends "bluecore/base.html" %}
     {% block content %}...{% endblock %}
 
-  `static_url` comes from bluecore_airflow_common.context.
+  Values come from bluecore_airflow_common.context (see its docs).
+  The header and footer come from bluecore-stack; without it they don't show.
+  A page can replace them with the header and footer blocks.
 #}
 <!doctype html>
 <html lang="en">
@@ -15,9 +17,21 @@
     <title>{{ title }}</title>
     <link rel="stylesheet" href="{{ static_url('bluecore/bluecore.css')  }}" />
     <script src="{{ static_url('bluecore/bluecore.js') }}"></script>
+    {# no defer, so the header shows right away #}
+    <script src="{{ header_footer_script }}"></script>
     {% block head %}{% endblock %}
   </head>
   <body class="{% block body_class %}{% endblock %}">
-    {% block content %}{% endblock %}
+    {% block header %}
+    <bluecore-header
+      app-name="{{ app_name | default('') }}"
+      {% if app_logo %}app-logo="{{ app_logo }}"{% endif %}
+      {% if current_app %}current-app="{{ current_app }}"{% endif %}
+      logout
+      data-logout-url="{{ logout_url }}"
+    ></bluecore-header>
+    {% endblock %}
+    <main class="bluecore-main">{% block content %}{% endblock %}</main>
+    {% block footer %}<bluecore-footer></bluecore-footer>{% endblock %}
   </body>
 </html>

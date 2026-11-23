@@ -47,3 +47,14 @@ def test_plugin_static_is_not_mounted_without_a_directory():
     response = TestClient(app).get("/static/layers.svg")
 
     assert response.status_code == 404
+
+
+def test_bluecore_js_sends_the_whole_window_to_logout():
+    script = (common.STATIC_DIR / "bluecore.js").read_text()
+
+    assert '"bluecore-logout"' in script
+    assert 'getAttribute("data-logout-url")' in script
+    # Airflow's iframe can't change the window, so it clicks a link on Airflow's page
+    assert "window.top.location.assign(url)" not in script
+    assert "window.top.document" in script
+    assert 'a[target="_top"]' in script
