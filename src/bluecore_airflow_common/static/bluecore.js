@@ -37,3 +37,59 @@
     attributeFilter: ["data-theme"],
   });
 })();
+
+/*
+ * Makes the header's links and Logout button work inside Airflow.
+ *
+ * Airflow shows plugin pages in a locked-down iframe that can't change the
+ * whole window. So instead, this clicks a link on Airflow's own page.
+ * Logout goes to Airflow's logout URL (data-logout-url in base.html).
+ */
+(function () {
+  "use strict";
+
+  function topDocument() {
+    try {
+      return window.top !== window ? window.top.document : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function navigateWholeWindow(url) {
+    var doc = topDocument();
+    if (!doc) {
+      window.location.assign(url);
+      return;
+    }
+    var link = doc.createElement("a");
+    link.href = new URL(url, window.location.href).href;
+    link.hidden = true;
+    doc.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  document.addEventListener("bluecore-logout", function (event) {
+    var url = event.target.getAttribute("data-logout-url");
+    if (url) {
+      navigateWholeWindow(url);
+    }
+  });
+
+  // Header and footer links. Ctrl/Cmd/Shift clicks work as usual.
+  document.addEventListener("click", function (event) {
+    if (!topDocument() || event.defaultPrevented || event.button !== 0) {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    var link = event.target.closest && event.target.closest('a[target="_top"][href]');
+    if (!link || !/^https?:$/.test(link.protocol)) {
+      return;
+    }
+    event.preventDefault();
+    navigateWholeWindow(link.href);
+  });
+})();
