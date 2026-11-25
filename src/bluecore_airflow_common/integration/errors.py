@@ -8,7 +8,10 @@ this body::
     {"error": {"code": ..., "message": ..., "upstream_status": ..., "request_id": ...}}
 
 The message is fixed by the error class. Upstream bodies and stack traces are
-logged under the ``request_id`` and are never returned.
+logged under the ``request_id`` and are never returned. ``ErrorBody`` describes
+that body for a route's OpenAPI ``responses``::
+
+    @app.get("/jobs/{run_id}", responses={404: {"model": ErrorBody}})
 """
 
 import logging
@@ -22,12 +25,28 @@ import urllib3
 from airflow_client.client.exceptions import ApiException
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _SAFE_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _BODY_LOG_LIMIT = 2000
+
+
+class ErrorDetail(BaseModel):
+    """The ``error`` in an error response"""
+
+    code: str
+    message: str
+    upstream_status: int | None
+    request_id: str
+
+
+class ErrorBody(BaseModel):
+    """The body of every error response, from ``IntegrationError.body()``"""
+
+    error: ErrorDetail
 
 
 class IntegrationError(Exception):

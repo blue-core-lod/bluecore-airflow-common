@@ -450,3 +450,24 @@ def test_handler_maps_airflow_client_errors(exc, http_status, code):
     assert response.status_code == http_status
     assert response.json()["error"]["code"] == code
     assert "abc123" not in response.text
+
+
+def all_subclasses(cls):
+    for sub in cls.__subclasses__():
+        yield sub
+        yield from all_subclasses(sub)
+
+
+@pytest.mark.parametrize(
+    "error_class", [errors.IntegrationError, *all_subclasses(errors.IntegrationError)]
+)
+def test_error_body_validates_every_error(error_class):
+    """ErrorBody describes body() for every IntegrationError subclass"""
+    if error_class is errors.NotImplementedUpstream:
+        error = error_class("BIBFRAME to MARC", BF2MARC_ISSUE)
+    else:
+        error = error_class("detail", upstream_status=500)
+
+    body = errors.ErrorBody.model_validate(error.body("rid-1"))
+
+    assert body.model_dump() == error.body("rid-1")

@@ -89,8 +89,8 @@ from typing import Annotated
 from airflow_client.client import DagRunApi
 from fastapi import Depends, FastAPI
 
-from bluecore_airflow_common.integration import airflow, auth, blue_core
-from bluecore_airflow_common.integration.errors import install_error_handler
+from bluecore_airflow_common.integration import airflow, auth, blue_core, reports
+from bluecore_airflow_common.integration.errors import ErrorBody, install_error_handler
 from bluecore_airflow_common.integration.settings import BlueCoreSettings, get_settings
 
 USER_AGENT = "my-plugin/1.0.0"
@@ -115,13 +115,29 @@ def job(run_id: str, settings: Settings, token: auth.AirflowToken) -> dict:
         "marc_to_bibframe", run_id, _request_timeout=settings.request_timeout
     )
     return {"state": run.state}
+
+
+@app.get("/jobs/{run_id}/reports", responses={404: {"model": ErrorBody}})
+def job_reports(run_id: str) -> dict:
+    directory = reports.run_dir("marc_to_bibframe", run_id)
+    # Check reports.owner_matches(...) against the run's conf first.
+    return {
+        "formats": sorted(reports.report_files(directory)),  # ["csv", "html"]
+        # {"marc_records": null, "entities": 12}, or null if there are none
+        "counts": reports.read_counts(directory),
+    }
 ```
 
 Use plain `def` routes: both clients are synchronous, so
 FastAPI runs them in its threadpool. Reads from Blue Core are anonymous; for a
 write, pass `token=` from `auth.KeycloakToken` to `blue_core.make_client`.
 Upstream failures come back as
-`{"error": {"code", "message", "upstream_status", "request_id"}}`.
+`{"error": {"code", "message", "upstream_status", "request_id"}}`, which
+`ErrorBody` describes for a route's OpenAPI `responses`. The report readers
+treat files on the reports volume as untrusted; see
+[Report retrieval](docs/integration-contracts.md#report-retrieval-partial).
+`read_counts` returns a `RunCounts` model; for counts only one DAG writes,
+subclass it with `reports.Count` fields and call the subclass's `read()`.
 
 ### Testing
 
@@ -148,7 +164,8 @@ app.dependency_overrides[auth.keycloak_token] = lambda: "test-token"
 - Tests that read the environment instead should call `get_settings.cache_clear()`
   after changing it.
 - Point `BLUECORE_REPORTS_DIR` and `BLUECORE_UPLOADS_DIR` at `tmp_path`, or
-  pass `base_dir=` to `reports.run_dir` and `uploads.stage_upload`.
+  pass `base_dir=` to `reports.run_dir`, the report readers and
+  `uploads.stage_upload`.
 
   
 ## Development
