@@ -138,13 +138,16 @@ that failed on its own.
 | | |
 |---|---|
 | Owner | bluecore-workflows writes them; plugins read them |
-| Call | `reports.run_dir(dag_id, run_id)`, then fixed names in it: `report.json`, `index.html` |
+| Call | `reports.run_dir(dag_id, run_id)`, then `reports.report_files(directory)` and `reports.read_counts(directory)` (or `MyCounts.read(directory)` for a `RunCounts` subclass), or `reports.read_json(directory, name, max_bytes=…)` for another fixed name |
 | Auth | Airflow login on the plugin route, then `reports.owner_matches(dag_run.conf, user_uid, roles=…, admin_roles=…)`. A run without `user_uid` is visible to admins only |
-| Schemas | `report.json` is the report as each DAG assembles it; there's no shared schema yet |
-| Limits | ids that slug to `""`, `.` or `..` are a 404; file names never come from the request |
+| Schemas | report formats are fixed: `html` → `index.html`, `json` → `report.json`, `csv` → `report.csv` (`REPORT_FILES`). `counts.json` is a JSON object of non-negative integer counts, read as `reports.RunCounts`: `marc_records` and `entities` are shared by every DAG, and a plugin subclasses `RunCounts` with `reports.Count` fields for counts only one DAG writes. Each key is optional: a missing key or `null` means unknown, and `0` means zero. Unknown keys are ignored, so a DAG can add a count before its readers know it. `report.json` is the report as each DAG assembles it; there's no shared schema yet |
+| Limits | ids that slug to `""`, `.` or `..` are a 404; file names never come from the request, and `read_json` raises `ValueError` for a name that isn't bare. Files are untrusted: only regular files are read, a symlink is followed only within the run's own directory, and `counts.json` is read only up to `MAX_COUNTS_BYTES` (64 KiB). A missing, oversized, non-UTF-8 or non-object file reads as `None`. A count that isn't a non-negative integer (a boolean, string, float or negative number) reads as unknown without affecting the others, and a file with no usable count reads as `None` |
 | Idempotency | read-only |
 
-Only `bulk_update` writes a report today. Still missing:
+Only `bulk_update` writes a report today, and no DAG writes `counts.json` yet,
+so plugins show counts as unavailable. Rules for one DAG, such as reading
+`bulk_update`'s `processed` as an entity count, stay in each plugin, and so
+do the `RunCounts` subclasses for counts only that DAG writes. Still missing:
 
 - Blue Core API reporting routes:
   [bluecore_api#61](https://github.com/blue-core-lod/bluecore_api/issues/61)
